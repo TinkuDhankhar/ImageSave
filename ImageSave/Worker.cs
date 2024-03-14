@@ -1,15 +1,9 @@
-using Microsoft.Data.SqlClient;
-using Microsoft.EntityFrameworkCore;
+using Dapper;
 using System.Drawing;
 using System.Drawing.Drawing2D;
-using System.Globalization;
-using System.Net.Mail;
 using System.Net;
+using System.Net.Mail;
 using System.Net.Mime;
-using Microsoft.AspNetCore.Html;
-using System.Reflection.PortableExecutable;
-using System.Text;
-using Dapper;
 namespace ImageSave
 {
     public class Worker : BackgroundService
@@ -30,8 +24,6 @@ namespace ImageSave
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                //string SQL = "SELECT * FROM ImageProcess WHERE Active = 1 AND (SyncDateTime IS NULL OR SyncDateTime = CONVERT(DATETIME, @SyncDate))";
-                //var data = await _db.ImageProcess.FromSqlRaw(SQL, new SqlParameter("@SyncDate", DateTime.Now)).FirstOrDefaultAsync();
                 var param = new DynamicParameters();
                 param.Add("Type", 0);
                 param.Add("SyncDate", DateTime.Now);
