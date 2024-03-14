@@ -9,6 +9,7 @@ using System.Net.Mime;
 using Microsoft.AspNetCore.Html;
 using System.Reflection.PortableExecutable;
 using System.Text;
+using Dapper;
 namespace ImageSave
 {
     public class Worker : BackgroundService
@@ -29,23 +30,40 @@ namespace ImageSave
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                string SQL = "SELECT * FROM ImageProcess WHERE Active = 1 AND (SyncDateTime IS NULL OR SyncDateTime = CONVERT(DATETIME, @SyncDate))";
-                var data = await _db.ImageProcess.FromSqlRaw(SQL, new SqlParameter("@SyncDate", DateTime.Now)).ToListAsync();
-                if (_logger.IsEnabled(LogLevel.Information))
+                //string SQL = "SELECT * FROM ImageProcess WHERE Active = 1 AND (SyncDateTime IS NULL OR SyncDateTime = CONVERT(DATETIME, @SyncDate))";
+                //var data = await _db.ImageProcess.FromSqlRaw(SQL, new SqlParameter("@SyncDate", DateTime.Now)).FirstOrDefaultAsync();
+                var param = new DynamicParameters();
+                param.Add("Type", 0);
+                param.Add("SyncDate", DateTime.Now);
+                var data = await _db.QueryFirstOrDefaultAsync<ImageProcess>("USP_AutoProcess", param);
+                if (data is not null)
                 {
-                    string newHTML = GetHTML(data);
-                    foreach (var item in data)
+                    var SourcePath = Directory.GetFiles(data.SourcePath);
+                    var DestinationPath = Directory.GetFiles(data.DestinationPath);
+                    if (_logger.IsEnabled(LogLevel.Information))
                     {
-                        ReduceImageSize(0.5, item.SourcePath, item.DestinationPath);
-                        //_db.Database.ExecuteSqlRaw("UPDATE ImageProcess SET SyncDateTime = @SyncDate WHERE Id = @Id", new SqlParameter("@SyncDate", DateTime.Now), new SqlParameter("@Id", item.Id));
-
-                        //SendMail(new EmailModel() { Attachment = item.DestinationPath, Body = "This is test Mail", To = "tinkudhankhar@hotmail.com" });
+                        
+                        foreach (var item in SourcePath)
+                        {
+                            string FileName = Path.GetFileName(item);
+                            if (!DestinationPath.Any(x => x.EndsWith(FileName)))
+                            {
+                                ReduceImageSize(0.5, item, data.DestinationPath);
+                                var dParm = new DynamicParameters();
+                                dParm.Add("Type", 1);
+                                dParm.Add("SyncDate", DateTime.Now);
+                                await _db.ExecuteAsync("USP_AutoProcess", dParm);
+                            }
+                        }
+                        DestinationPath = Directory.GetFiles(data.DestinationPath);
+                        string newHTML = GetHTML(DestinationPath.ToList());
+                        string path = Download(newHTML, "Test");
+                        SendMail(new EmailModel() { Attachment = path, Body = "This is test mail for you...", To = "tinkudhankhar@hotmail.com" });
+                        File.Delete(path);
+                        _logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now);
                     }
-                    string path = Download(newHTML, "Test");
-                    SendMail(new EmailModel() { Attachment = path, Body = "This is test mail for you...", To = "tinkudhankhar@hotmail.com" });
-                    File.Delete(path);
-                    _logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now);
                 }
+
                 await Task.Delay(1000, stoppingToken);
             }
         }
@@ -53,6 +71,7 @@ namespace ImageSave
         {
             try
             {
+                string fileName = Path.GetFileName(sourcePath);
                 using var image = Image.FromFile(sourcePath);
                 var newWidth = (int)(image.Width * scaleFactor);
                 var newHeight = (int)(image.Height * scaleFactor);
@@ -63,7 +82,7 @@ namespace ImageSave
                 thumbGraph.InterpolationMode = InterpolationMode.HighQualityBicubic;
                 var imageRectangle = new Rectangle(0, 0, newWidth, newHeight);
                 thumbGraph.DrawImage(image, imageRectangle);
-                thumbnailImg.Save(targetPath, image.RawFormat);
+                thumbnailImg.Save($"{targetPath}{fileName}", image.RawFormat);
             }
             catch (Exception ex)
             {
@@ -123,13 +142,13 @@ namespace ImageSave
             System.IO.File.WriteAllBytesAsync(pathToImage, pdf);
             return pathToImage;
         }
-        private string GetHTML(List<ImageProcess> imageProcess)
+        private string GetHTML(List<string> imageProcess)
         {
             string NewText = string.Empty;
             string html = File.ReadAllText("Test.html");
             foreach (var item in imageProcess)
             {
-                NewText += $"<tr><td><img src='{item.DestinationPath}'/></td><td>{item.CreatedDate}</td></tr>";
+                NewText += $"<tr><td><img src='{item}'/></td></tr>";
             }
             html = html.Replace("{body}", NewText);
             return html;
