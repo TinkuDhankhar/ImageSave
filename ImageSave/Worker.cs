@@ -30,29 +30,34 @@ namespace ImageSave
                 var data = await _db.QueryFirstOrDefaultAsync<ImageProcess>("USP_AutoProcess", param);
                 if (data is not null)
                 {
-                    var SourcePath = Directory.GetFiles(data.SourcePath);
-                    var DestinationPath = Directory.GetFiles(data.DestinationPath);
-                    if (_logger.IsEnabled(LogLevel.Information))
+                    if (File.GetLastWriteTime(data.SourcePath) > data.SyncDateTime)
                     {
-                        
-                        foreach (var item in SourcePath)
+                        var sourcedirectoryInfo = new DirectoryInfo(data.SourcePath);
+                        var distinationdirectoryInfo = new DirectoryInfo(data.DestinationPath);
+                        var SourcePath = sourcedirectoryInfo.GetFiles().Where(x => x.LastAccessTime > data.SyncDateTime).ToList();
+                        if (_logger.IsEnabled(LogLevel.Information))
                         {
-                            string FileName = Path.GetFileName(item);
-                            if (!DestinationPath.Any(x => x.EndsWith(FileName)))
+                            foreach (var item in SourcePath)
                             {
-                                ReduceImageSize(0.5, item, data.DestinationPath);
-                                var dParm = new DynamicParameters();
-                                dParm.Add("Type", 1);
-                                dParm.Add("SyncDate", DateTime.Now);
-                                await _db.ExecuteAsync("USP_AutoProcess", dParm);
+                                string FileName = Path.GetFileName(item.Name);
+                                //if (!DestinationPath.Any(x => x.EndsWith(FileName)))
+                                //{
+                                ReduceImageSize(0.5, item.FullName, data.DestinationPath);
+                                //}
                             }
+
+                            var dParm = new DynamicParameters();
+                            dParm.Add("Type", 1);
+                            dParm.Add("SyncDate", DateTime.Now);
+                            await _db.ExecuteAsync("USP_AutoProcess", dParm);
+                            var DestinationPath = distinationdirectoryInfo.GetFiles().Where(x => x.LastAccessTime > data.SyncDateTime).ToList();
+
+                            string newHTML = GetHTML(DestinationPath);
+                            string path = Download(newHTML, "Test");
+                            //SendMail(new EmailModel() { Attachment = path, Body = "This is test mail for you...", To = "tinkudhankhar@hotmail.com" });
+                            //File.Delete(path);
+                            _logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now);
                         }
-                        DestinationPath = Directory.GetFiles(data.DestinationPath);
-                        string newHTML = GetHTML(DestinationPath.ToList());
-                        string path = Download(newHTML, "Test");
-                        SendMail(new EmailModel() { Attachment = path, Body = "This is test mail for you...", To = "tinkudhankhar@hotmail.com" });
-                        File.Delete(path);
-                        _logger.LogInformation("Worker running at: {time}", DateTimeOffset.Now);
                     }
                 }
 
@@ -134,13 +139,13 @@ namespace ImageSave
             System.IO.File.WriteAllBytesAsync(pathToImage, pdf);
             return pathToImage;
         }
-        private string GetHTML(List<string> imageProcess)
+        private string GetHTML(List<FileInfo> imageProcess)
         {
             string NewText = string.Empty;
             string html = File.ReadAllText("Test.html");
             foreach (var item in imageProcess)
             {
-                NewText += $"<tr><td><img src='{item}'/></td></tr>";
+                NewText += $"<tr><td><img src='{item.FullName}'/></td></tr>";
             }
             html = html.Replace("{body}", NewText);
             return html;
